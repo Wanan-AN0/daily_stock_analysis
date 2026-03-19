@@ -456,6 +456,7 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertEqual(report.meta.stock_name, "Unnamed Stock")
         self.assertEqual(report.summary.operation_advice, "Buy")
         self.assertEqual(report.summary.trend_prediction, "Bullish")
+        self.assertEqual(report.summary.sentiment_label, "Bullish")
 
     def test_delete_analysis_history_records_also_cleans_backtests(self) -> None:
         """删除历史记录时应一并清理关联回测结果。"""

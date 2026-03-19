@@ -32,6 +32,7 @@ from api.v1.schemas.history import (
 from api.v1.schemas.common import ErrorResponse
 from src.storage import DatabaseManager
 from src.report_language import (
+    get_sentiment_label,
     get_localized_stock_name,
     localize_operation_advice,
     localize_trend_prediction,
@@ -275,7 +276,11 @@ def get_history_detail(
                 report_language,
             ),
             sentiment_score=result.get("sentiment_score"),
-            sentiment_label=result.get("sentiment_label")
+            sentiment_label=(
+                get_sentiment_label(result.get("sentiment_score"), report_language)
+                if result.get("sentiment_score") is not None
+                else result.get("sentiment_label")
+            )
         )
         
         strategy = ReportStrategy(

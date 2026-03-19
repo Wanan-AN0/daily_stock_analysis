@@ -20,7 +20,10 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv, dotenv_values
 from dataclasses import dataclass, field
 
-from src.report_language import normalize_report_language
+from src.report_language import (
+    is_supported_report_language_value,
+    normalize_report_language,
+)
 
 
 @dataclass
@@ -704,6 +707,8 @@ class Config:
         2. .env 文件
         3. 代码中的默认值
         """
+        preexisting_report_language = os.environ.get("REPORT_LANGUAGE")
+
         # 确保环境变量已加载
         setup_env()
 
@@ -944,7 +949,9 @@ class Config:
             else legacy_run_immediately
         )
 
-        report_language_raw = cls._resolve_report_language_env_value()
+        report_language_raw = cls._resolve_report_language_env_value(
+            preexisting_report_language
+        )
         
         return cls(
             stock_list=stock_list,
@@ -1449,32 +1456,38 @@ class Config:
         return str(value)
 
     @classmethod
-    def _resolve_report_language_env_value(cls) -> str:
-        """Prefer `.env` REPORT_LANGUAGE over stale inherited process env."""
+    def _resolve_report_language_env_value(
+        cls,
+        preexisting_env_value: Optional[str],
+    ) -> str:
+        """Resolve REPORT_LANGUAGE while preserving real process env overrides."""
         file_value = cls._get_env_file_value("REPORT_LANGUAGE")
         env_value = os.getenv("REPORT_LANGUAGE")
 
-        if file_value is None:
-            return env_value or "zh"
+        if preexisting_env_value is not None:
+            env_text = preexisting_env_value.strip()
+            file_text = (file_value or "").strip()
+            if file_text and env_text and env_text.lower() != file_text.lower():
+                env_file = os.getenv("ENV_FILE") or str(Path(__file__).parent.parent / ".env")
+                logging.getLogger(__name__).warning(
+                    "REPORT_LANGUAGE environment value '%s' overrides %s ('%s')",
+                    preexisting_env_value,
+                    env_file,
+                    file_value,
+                )
+            return preexisting_env_value
 
-        env_text = (env_value or "").strip()
-        file_text = file_value.strip()
-        if env_text and file_text and env_text.lower() != file_text.lower():
-            env_file = os.getenv("ENV_FILE") or str(Path(__file__).parent.parent / ".env")
-            logging.getLogger(__name__).warning(
-                "REPORT_LANGUAGE environment value '%s' differs from %s ('%s'); using the file value",
-                env_value,
-                env_file,
-                file_value,
-            )
-        return file_value or "zh"
+        if file_value is not None:
+            return file_value
+
+        return env_value or "zh"
 
     @classmethod
     def _parse_report_language(cls, value: Optional[str]) -> str:
         """Parse REPORT_LANGUAGE, fallback to zh for invalid values."""
         normalized = normalize_report_language(value, default="zh")
-        raw = (value or "zh").strip().lower()
-        if raw not in {"zh", "en"} and normalized == "zh":
+        raw = (value or "").strip()
+        if raw and not is_supported_report_language_value(raw):
             logging.getLogger(__name__).warning(
                 "REPORT_LANGUAGE '%s' invalid, fallback to 'zh' (valid: zh/en)",
                 value,

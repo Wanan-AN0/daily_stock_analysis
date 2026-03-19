@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### 修复
 
-- 🌍 **修复 `REPORT_LANGUAGE` 启动时被旧进程环境覆盖的问题** — `Config` 现在会在加载报告语言时优先读取活动 `.env` 文件中的 `REPORT_LANGUAGE`，避免 Web/API 服务重启后仍沿用外层遗留的 `REPORT_LANGUAGE=zh`，导致 Agent Prompt、推送和历史记录继续生成中文报告；当进程环境与 `.env` 冲突时，会追加显式告警日志便于排查。
+- 🌍 **补齐 `REPORT_LANGUAGE` 启动解析与历史详情本地化边界** — `Config` 在启动时继续遵循“真实环境变量优先、`.env` 兜底”的既有语义，并在两者冲突时输出显式告警，减少 `REPORT_LANGUAGE` 来源不清带来的误判；同时 `/api/v1/history/{id}` 英文详情响应会同步本地化 `sentiment_label`，避免历史记录摘要仍出现 `乐观` 这类中英混排字段。
 
 ### 新功能
 

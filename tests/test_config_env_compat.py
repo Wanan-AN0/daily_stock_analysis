@@ -123,37 +123,14 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
 
     @patch("src.config.setup_env")
     @patch.object(Config, "_parse_litellm_yaml", return_value=[])
-    def test_report_language_prefers_env_file_value_over_stale_process_env(
+    def test_report_language_prefers_preexisting_process_env_over_env_file(
         self,
         _mock_parse_yaml,
         _mock_setup_env,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env_path = Path(temp_dir) / ".env"
-            env_path.write_text("REPORT_LANGUAGE=en\n", encoding="utf-8")
-
-            with patch.dict(
-                os.environ,
-                {
-                    "ENV_FILE": str(env_path),
-                    "REPORT_LANGUAGE": "zh",
-                },
-                clear=True,
-            ):
-                config = Config._load_from_env()
-
-        self.assertEqual(config.report_language, "en")
-
-    @patch("src.config.setup_env")
-    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
-    def test_report_language_falls_back_to_process_env_when_env_file_omits_it(
-        self,
-        _mock_parse_yaml,
-        _mock_setup_env,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env_path = Path(temp_dir) / ".env"
-            env_path.write_text("STOCK_LIST=600519\n", encoding="utf-8")
+            env_path.write_text("REPORT_LANGUAGE=zh\n", encoding="utf-8")
 
             with patch.dict(
                 os.environ,
@@ -166,6 +143,34 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
                 config = Config._load_from_env()
 
         self.assertEqual(config.report_language, "en")
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_report_language_uses_env_file_when_process_env_is_absent(
+        self,
+        _mock_parse_yaml,
+        _mock_setup_env,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / ".env"
+            env_path.write_text("REPORT_LANGUAGE=en\n", encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "ENV_FILE": str(env_path),
+                },
+                clear=True,
+            ):
+                config = Config._load_from_env()
+
+        self.assertEqual(config.report_language, "en")
+
+    def test_parse_report_language_accepts_known_alias_without_warning(self) -> None:
+        with self.assertNoLogs("src.config", level="WARNING"):
+            parsed = Config._parse_report_language("zh-cn")
+
+        self.assertEqual(parsed, "zh")
 
 
 if __name__ == "__main__":

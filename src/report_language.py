@@ -310,6 +310,14 @@ def normalize_report_language(value: Optional[str], default: str = "zh") -> str:
     return default
 
 
+def is_supported_report_language_value(value: Optional[str]) -> bool:
+    """Return whether the raw value is a supported language code or alias."""
+    candidate = (value or "").strip().lower().replace(" ", "_")
+    if not candidate:
+        return False
+    return candidate in SUPPORTED_REPORT_LANGUAGES or candidate in _REPORT_LANGUAGE_ALIASES
+
+
 def get_report_labels(language: Optional[str]) -> Dict[str, str]:
     """Return UI copy for the selected report language."""
     normalized = normalize_report_language(language)
