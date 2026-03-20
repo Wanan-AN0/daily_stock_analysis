@@ -46,7 +46,7 @@ _CATEGORY_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "category": "agent",
         "title": "Agent",
-        "description": "Agent mode and skill settings.",
+        "description": "Agent mode and strategy-skill settings.",
         "display_order": 55,
     },
     {
@@ -1517,8 +1517,8 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_order": 20,
     },
     "AGENT_SKILLS": {
-        "title": "Agent Skills",
-        "description": "Comma-separated list of active agent skills. Leave empty to use the default-active skill set declared in skill metadata. When set to specific skills (not 'all'), scheduled tasks will automatically use the Agent pipeline.",
+        "title": "Agent Strategies",
+        "description": "Comma-separated list of active agent strategy skills. Leave empty to use the default-active skill set declared in skill metadata. When set to specific skills (not 'all'), scheduled tasks will automatically use the Agent pipeline.",
         "category": "agent",
         "data_type": "string",
         "ui_control": "text",
@@ -1531,8 +1531,8 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_order": 30,
     },
     "AGENT_SKILL_DIR": {
-        "title": "Agent Skill Dir",
-        "description": "Directory containing agent skill definition files (YAML or SKILL.md bundles).",
+        "title": "Agent Strategy Dir",
+        "description": "Directory containing agent strategy-skill definition files (YAML or SKILL.md bundles).",
         "category": "agent",
         "data_type": "string",
         "ui_control": "text",
@@ -1577,7 +1577,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "AGENT_ORCHESTRATOR_MODE": {
         "title": "Orchestrator Mode",
-        "description": "Pipeline mode when AGENT_ARCH=multi. 'quick' (tech→decision), 'standard' (tech→intel→decision), 'full' (tech→intel→risk→decision), 'specialist' (full + per-skill specialist agents).",
+        "description": "Pipeline mode when AGENT_ARCH=multi. 'quick' (tech→decision), 'standard' (tech→intel→decision), 'full' (tech→intel→risk→decision), 'specialist' (full + per-strategy specialist agents).",
         "category": "agent",
         "data_type": "string",
         "ui_control": "select",
@@ -1665,8 +1665,8 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_order": 66,
     },
     "AGENT_SKILL_AUTOWEIGHT": {
-        "title": "Auto-Weight Skills",
-        "description": "Automatically weight skill opinions by their historical backtest performance.",
+        "title": "Auto-Weight Strategies",
+        "description": "Automatically weight strategy-skill opinions by their historical backtest performance.",
         "category": "agent",
         "data_type": "boolean",
         "ui_control": "switch",
@@ -1679,8 +1679,8 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_order": 67,
     },
     "AGENT_SKILL_ROUTING": {
-        "title": "Skill Routing",
-        "description": "Skill selection mode. 'auto' detects market regime and picks relevant skills; 'manual' uses AGENT_SKILLS list only.",
+        "title": "Strategy Routing",
+        "description": "Strategy-skill selection mode. 'auto' detects market regime and picks relevant skills; 'manual' uses AGENT_SKILLS list only.",
         "category": "agent",
         "data_type": "string",
         "ui_control": "select",

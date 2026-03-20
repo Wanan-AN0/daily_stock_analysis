@@ -128,7 +128,7 @@ def _build_skills_response(config) -> SkillsResponse:
 @router.get("/skills", response_model=SkillsResponse)
 async def get_skills():
     """
-    Get available agent skills.
+    Get available agent strategy skills.
     """
     return _build_skills_response(get_config())
 

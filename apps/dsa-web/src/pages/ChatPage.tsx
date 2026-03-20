@@ -789,7 +789,7 @@ const ChatPage: React.FC = () => {
             {skills.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-x-5 gap-y-2 items-start">
                 <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
-                  技能
+                  策略
                 </span>
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer group mt-0.5">
                   <input

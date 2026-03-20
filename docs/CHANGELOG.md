@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 新增 Ollama 本地模型配置说明，同步更新 `README.md` 与 `docs/README_EN.md`（Fixes #690）
 - 完善 Ollama 配置说明：`docs/full-guide.md` / `docs/full-guide_EN.md` 环境变量表与 Note 补充 `OLLAMA_API_BASE`，避免英文用户误以为 Ollama 不能作为独立配置入口；合并重复的 `OLLAMA_API_BASE` 条目为单一条目
 - 明确文档同步治理边界：补充 `README.md`、专题文档、双语文档与交付说明之间的默认同步规则，减少后续文档漂移
+- 调整 Agent 术语兼容文案：用户入口继续以“策略”为主称呼，README、双语文档、设置页与问股界面补充 `skill` 作为内部统一命名，降低迁移期理解成本
 
 ## [3.8.0] - 2026-03-17
 
