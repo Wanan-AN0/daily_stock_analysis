@@ -56,10 +56,15 @@ jobs:
         run: |
           mkdir -p data logs reports
       
+      - name: 设置时区为北京时间
+        run: |
+          sudo timedatectl set-timezone Asia/Shanghai
+
       - name: 执行股票分析
         env:
           # ==========================================
           # AI 配置
+          TZ: 'Asia/Shanghai'
           # ==========================================
           # LITELLM_CONFIG
           LITELLM_CONFIG: ${{ vars.LITELLM_CONFIG || secrets.LITELLM_CONFIG }}
