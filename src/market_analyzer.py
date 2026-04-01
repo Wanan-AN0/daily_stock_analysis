@@ -298,7 +298,8 @@ class MarketAnalyzer:
         
         logger.info(f"[大盘] 调用大模型生成复盘报告（语言: {self.report_language}）...")
         # Use the public generate_text() entry point — pass report_language for multilingual support
-        review = self.analyzer.generate_text(prompt, max_tokens=2048, temperature=0.7, report_language=self.report_language)
+        # max_tokens 从 2048 提升到 8192 (Issue #863)
+        review = self.analyzer.generate_text(prompt, max_tokens=8192, temperature=0.7, report_language=self.report_language)
 
         if review:
             logger.info("[大盘] 复盘报告生成成功，长度: %d 字符", len(review))
