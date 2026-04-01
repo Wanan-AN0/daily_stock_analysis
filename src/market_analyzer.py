@@ -103,6 +103,7 @@ class MarketAnalyzer:
             analyzer: AI分析器实例（用于调用LLM）
             region: 市场区域 cn=A股 us=美股
         """
+        from src.report_language import normalize_report_language
         self.config = get_config()
         self.search_service = search_service
         self.analyzer = analyzer
@@ -110,6 +111,8 @@ class MarketAnalyzer:
         self.region = region if region in ("cn", "us") else "cn"
         self.profile: MarketProfile = get_profile(self.region)
         self.strategy = get_market_strategy_blueprint(self.region)
+        # 从配置中获取报告语言设置
+        self.report_language = normalize_report_language(getattr(self.config, "report_language", "zh"))
 
     def get_market_overview(self) -> MarketOverview:
         """
@@ -290,12 +293,12 @@ class MarketAnalyzer:
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
             return self._generate_template_review(overview, news)
         
-        # 构建 Prompt
+        # 构建 Prompt（传入 report_language 以生成对应语言报告）
         prompt = self._build_review_prompt(overview, news)
         
-        logger.info("[大盘] 调用大模型生成复盘报告...")
-        # Use the public generate_text() entry point — never access private analyzer attributes.
-        review = self.analyzer.generate_text(prompt, max_tokens=2048, temperature=0.7)
+        logger.info(f"[大盘] 调用大模型生成复盘报告（语言: {self.report_language}）...")
+        # Use the public generate_text() entry point — pass report_language for multilingual support
+        review = self.analyzer.generate_text(prompt, max_tokens=2048, temperature=0.7, report_language=self.report_language)
 
         if review:
             logger.info("[大盘] 复盘报告生成成功，长度: %d 字符", len(review))

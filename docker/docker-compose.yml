@@ -31,6 +31,9 @@ x-common: &common
 
   environment:
     - TZ=Asia/Shanghai
+    - LANG=zh_CN.UTF-8
+    - LC_ALL=zh_CN.UTF-8
+    - LANGUAGE=zh_CN:zh
 
     # Web/API service bind address (must be 0.0.0.0 inside container)
     - WEBUI_HOST=0.0.0.0

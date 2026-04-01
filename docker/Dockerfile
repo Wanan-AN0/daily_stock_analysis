@@ -23,7 +23,12 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
+# 使用国内镜像源加速
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list 2>/dev/null || true
+
 # 安装系统依赖（wkhtmltopdf 含 wkhtmltoimage，用于 Markdown 转图片 Issue #289）
+# 同时安装中文语言包和字体支持
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     curl \
@@ -32,13 +37,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg62-turbo \
     libxrender1 \
     libxext6 \
-    && rm -rf /var/lib/apt/lists/*
+    locales \
+    fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i '/zh_CN.UTF-8/s/^# //g' /etc/locale.gen \
+    && locale-gen zh_CN.UTF-8
+
+# 设置中文语言环境
+ENV LANG=zh_CN.UTF-8 \
+    LC_ALL=zh_CN.UTF-8 \
+    LANGUAGE=zh_CN:zh
 
 # 复制依赖文件
 COPY requirements.txt .
 
-# 安装 Python 依赖
-RUN pip install --no-cache-dir -r requirements.txt
+# 使用清华大学 pip 镜像源加速安装 Python 依赖
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY *.py ./

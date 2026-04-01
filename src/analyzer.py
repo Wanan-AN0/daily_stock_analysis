@@ -804,6 +804,30 @@ class GeminiAnalyzer:
 - 不要编造价格、财报或新闻事实
 """
 
+    # 大盘复盘系统提示（根据语言动态生成）
+    @staticmethod
+    def _get_market_review_system_prompt(language: str = "zh") -> str:
+        """Get market review system prompt based on language."""
+        if language == "en":
+            return """You are a professional US stock market analyst.
+
+- Provide analysis in English
+- Answer must be based on user-provided data and context
+- If information is insufficient, clearly state the uncertainty
+- Do not fabricate prices, earnings, or news facts
+- Use professional financial terminology
+- Output in Markdown format
+"""
+        else:
+            return """你是一位专业的股票市场分析助手。
+
+- 使用中文撰写分析报告
+- 回答必须基于用户提供的数据与上下文
+- 若信息不足，要明确指出不确定性
+- 不要编造价格、财报或新闻事实
+- 使用专业的金融术语
+- 输出格式为 Markdown"""
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -995,6 +1019,7 @@ class GeminiAnalyzer:
         generation_config: dict,
         *,
         system_prompt: Optional[str] = None,
+        report_language: str = "zh",
     ) -> Tuple[str, str, Dict[str, Any]]:
         """Call LLM via litellm with fallback across configured models.
 
@@ -1006,6 +1031,8 @@ class GeminiAnalyzer:
         Args:
             prompt: User prompt text.
             generation_config: Dict with optional keys: temperature, max_output_tokens, max_tokens.
+            system_prompt: Optional system prompt override.
+            report_language: Output language for the generated text (zh/en).
 
         Returns:
             Tuple of (response text, model_used, usage). On success model_used is the full model
@@ -1019,13 +1046,16 @@ class GeminiAnalyzer:
         )
         temperature = generation_config.get('temperature', 0.7)
 
+        # Get system prompt with language preference
+        lang = normalize_report_language(report_language)
+        effective_system_prompt = system_prompt or self._get_market_review_system_prompt(lang)
+
         models_to_try = [config.litellm_model] + (config.litellm_fallback_models or [])
         models_to_try = [m for m in models_to_try if m]
 
         use_channel_router = self._has_channel_config(config)
 
         last_error = None
-        effective_system_prompt = system_prompt or self.TEXT_SYSTEM_PROMPT
         for model in models_to_try:
             try:
                 model_short = model.split("/")[-1] if "/" in model else model
@@ -1082,6 +1112,7 @@ class GeminiAnalyzer:
         prompt: str,
         max_tokens: int = 2048,
         temperature: float = 0.7,
+        report_language: str = "zh",
     ) -> Optional[str]:
         """Public entry point for free-form text generation.
 
@@ -1093,14 +1124,19 @@ class GeminiAnalyzer:
             prompt:      Text prompt to send to the LLM.
             max_tokens:  Maximum tokens in the response (default 2048).
             temperature: Sampling temperature (default 0.7).
+            report_language: Output language for the generated text (zh/en).
 
         Returns:
             Response text, or None if the LLM call fails (error is logged).
         """
+        # Use the provided report_language or fall back to config
+        lang = normalize_report_language(report_language)
+        
         try:
             result = self._call_litellm(
                 prompt,
                 generation_config={"max_tokens": max_tokens, "temperature": temperature},
+                report_language=lang,
             )
             if isinstance(result, tuple):
                 text, model_used, usage = result
