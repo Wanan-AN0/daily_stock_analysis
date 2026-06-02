@@ -22,7 +22,11 @@ import litellm
 from json_repair import repair_json
 from litellm import Router
 
-from src.agent.llm_adapter import get_thinking_extra_body
+from src.agent.llm_adapter import (
+    get_thinking_extra_body,
+    resolve_fallback_litellm_wire_models,
+    register_fallback_model_pricing,
+)
 from src.agent.skills.defaults import CORE_TRADING_SKILL_POLICY_ZH
 from src.config import (
     Config,
@@ -30,6 +34,8 @@ from src.config import (
     get_api_keys_for_model,
     get_config,
     get_configured_llm_models,
+    normalize_litellm_temperature,
+    resolve_litellm_wire_model,
     resolve_news_window_days,
 )
 from src.llm.generation_params import apply_litellm_generation_params
@@ -41,13 +47,16 @@ from src.report_language import (
     get_no_data_text,
     get_placeholder_text,
     get_unknown_text,
+    get_chip_unavailable_text,
     infer_decision_type_from_advice,
+    is_chip_placeholder_value,
     localize_chip_health,
     localize_confidence_level,
     normalize_report_language,
 )
 from src.schemas.report_schema import AnalysisReportSchema
 from src.market_context import get_market_role, get_market_guidelines
+from src.market_phase_prompt import format_market_phase_prompt_section
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +84,76 @@ def _normalize_risk_warning_values(value: Any) -> List[str]:
         return [text] if text else []
     text = str(value).strip()
     return [text] if text else []
+
+
+def _today_has_realtime_overlay(today: Any) -> bool:
+    if not isinstance(today, dict):
+        return False
+    data_source = today.get("data_source") or today.get("dataSource")
+    if isinstance(data_source, str) and data_source.startswith("realtime:"):
+        return True
+    if today.get("is_partial_bar") is True or today.get("isPartialBar") is True:
+        return True
+    if today.get("is_estimated") is True or today.get("isEstimated") is True:
+        return True
+    return bool(today.get("estimated_fields") or today.get("estimatedFields"))
+
+
+def _today_looks_complete_daily_bar(
+    context: Dict[str, Any],
+    phase_context: Dict[str, Any],
+) -> bool:
+    today = context.get("today")
+    if (
+        not isinstance(today, dict)
+        or today.get("close") in (None, "")
+        or _today_has_realtime_overlay(today)
+    ):
+        return False
+
+    effective_date = phase_context.get("effective_daily_bar_date")
+    today_date = today.get("date") or today.get("trade_date") or context.get("date")
+    if effective_date and today_date and str(today_date) != str(effective_date):
+        return False
+    return True
+
+
+def _phase_aware_quote_labels(context: Dict[str, Any]) -> Tuple[str, str]:
+    """Choose Chinese quote-table labels that do not conflict with phase context."""
+    phase_context = context.get("market_phase_context")
+    if not isinstance(phase_context, dict):
+        return "今日行情", "收盘价"
+
+    phase = str(phase_context.get("phase") or "").strip()
+    if phase in {"premarket", "non_trading"}:
+        today = context.get("today")
+        if _today_looks_complete_daily_bar(context, phase_context):
+            return "上一完整交易日行情", "上一完整交易日收盘价"
+        if _today_has_realtime_overlay(today):
+            return "最新行情", "实时估算价"
+        if isinstance(today, dict) and today.get("close") not in (None, ""):
+            return "最新行情", "最新价"
+        return "今日行情", "收盘价"
+
+    if (
+        phase in {"intraday", "lunch_break", "closing_auction"}
+        and phase_context.get("is_partial_bar") is True
+    ):
+        return "最新行情", "盘中估算价"
+
+    return "今日行情", "收盘价"
+
+
+def _should_hide_regular_session_ohlc(context: Dict[str, Any]) -> bool:
+    phase_context = context.get("market_phase_context")
+    if not isinstance(phase_context, dict):
+        return False
+
+    phase = str(phase_context.get("phase") or "").strip()
+    return phase in {"premarket", "non_trading"} and not _today_looks_complete_daily_bar(
+        context,
+        phase_context,
+    )
 
 
 class _LiteLLMStreamError(RuntimeError):
@@ -245,12 +324,7 @@ _CHIP_KEYS: tuple = ("profit_ratio", "avg_cost", "concentration", "chip_health")
 
 def _is_value_placeholder(v: Any) -> bool:
     """True if value is empty or placeholder (N/A, 数据缺失, etc.)."""
-    if v is None:
-        return True
-    if isinstance(v, (int, float)) and v == 0:
-        return True
-    s = str(v).strip().lower()
-    return s in ("", "n/a", "na", "数据缺失", "未知", "data unavailable", "unknown", "tbd")
+    return is_chip_placeholder_value(v)
 
 
 _RISK_WARNING_PLACEHOLDER_TEXTS = {
@@ -342,6 +416,20 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return float(str(v).strip())
     except (TypeError, ValueError):
         return default
+
+
+def _coerce_chip_metric(v: Any) -> Optional[float]:
+    """Convert chip metrics while preserving the distinction between missing and zero."""
+    if v is None:
+        return None
+    try:
+        numeric = float(v)
+    except (TypeError, ValueError):
+        try:
+            numeric = float(str(v).strip())
+        except (TypeError, ValueError):
+            return None
+    return None if math.isnan(numeric) else numeric
 
 
 _BULLISH_TREND_HINTS: Tuple[str, ...] = (
@@ -600,9 +688,56 @@ def _build_chip_structure_from_data(chip_data: Any, language: str = "zh") -> Dic
     }
 
 
+def _has_meaningful_chip_data(chip_data: Any) -> bool:
+    """Return True when chip data has the core metrics required for reporting."""
+    if not chip_data:
+        return False
+    if hasattr(chip_data, "avg_cost"):
+        avg_cost = _coerce_chip_metric(getattr(chip_data, "avg_cost", None))
+        concentration_90 = _coerce_chip_metric(getattr(chip_data, "concentration_90", None))
+        concentration_70 = _coerce_chip_metric(getattr(chip_data, "concentration_70", None))
+    else:
+        d = chip_data if isinstance(chip_data, dict) else {}
+        avg_cost = _coerce_chip_metric(d.get("avg_cost"))
+        concentration_90_value = d.get("concentration_90")
+        if concentration_90_value is None:
+            concentration_90_value = d.get("concentration")
+        concentration_90 = _coerce_chip_metric(concentration_90_value)
+        concentration_70 = _coerce_chip_metric(d.get("concentration_70"))
+    return (
+        avg_cost is not None
+        and avg_cost > 0
+        and (
+            (concentration_90 is not None and concentration_90 >= 0)
+            or (concentration_70 is not None and concentration_70 >= 0)
+        )
+    )
+
+
+def _mark_chip_structure_unavailable(result: "AnalysisResult", language: str) -> None:
+    if not result or not isinstance(result.dashboard, dict):
+        return
+    data_perspective = result.dashboard.get("data_perspective")
+    if not isinstance(data_perspective, dict):
+        return
+    data_perspective["chip_structure"] = {}
+    data_perspective["chip_unavailable_reason"] = get_chip_unavailable_text(language)
+
+
+def normalize_chip_structure_availability(result: "AnalysisResult", chip_data: Any) -> None:
+    """Fill valid chip metrics or collapse placeholder-only chip fields to one fallback line."""
+    if not result:
+        return
+    language = getattr(result, "report_language", "zh")
+    if _has_meaningful_chip_data(chip_data):
+        fill_chip_structure_if_needed(result, chip_data)
+        return
+    _mark_chip_structure_unavailable(result, language)
+
+
 def fill_chip_structure_if_needed(result: "AnalysisResult", chip_data: Any) -> None:
     """When chip_data exists, fill chip_structure placeholder fields from chip_data (in-place)."""
-    if not result or not chip_data:
+    if not result or not _has_meaningful_chip_data(chip_data):
         return
     try:
         if not result.dashboard:
@@ -1356,6 +1491,9 @@ class AnalysisResult:
     # ========== 历史对比（Report Engine P0）==========
     query_id: Optional[str] = None  # 本次分析 query_id，用于历史对比时排除本次记录
 
+    # ========== 基本面上下文（仅运行时，用于通知拼装；不持久化到 to_dict）==========
+    fundamental_context: Optional[Dict[str, Any]] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -2071,6 +2209,8 @@ class GeminiAnalyzer:
         router_model_names: set[str],
     ) -> Any:
         """Dispatch a LiteLLM completion through router or direct fallback."""
+        wire_models = resolve_fallback_litellm_wire_models(model, config.llm_model_list)
+        register_fallback_model_pricing(wire_models)
         effective_kwargs = dict(call_kwargs)
         if use_channel_router and self._router and model in router_model_names:
             return self._router.completion(**effective_kwargs)
@@ -2476,6 +2616,7 @@ class GeminiAnalyzer:
         news_context: Optional[str] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         stream_progress_callback: Optional[Callable[[int], None]] = None,
+        analysis_context_pack_summary: Optional[str] = None,
     ) -> AnalysisResult:
         """
         分析单只股票
@@ -2542,7 +2683,13 @@ class GeminiAnalyzer:
         
         try:
             # 格式化输入（包含技术面数据和新闻）
-            prompt = self._format_prompt(context, name, news_context, report_language=report_language)
+            prompt = self._format_prompt(
+                context,
+                name,
+                news_context,
+                report_language=report_language,
+                analysis_context_pack_summary=analysis_context_pack_summary,
+            )
             
             config = self._get_runtime_config()
             model_name = config.litellm_model or "unknown"
@@ -2615,6 +2762,7 @@ class GeminiAnalyzer:
                 result.market_snapshot = self._build_market_snapshot(context)
                 result.model_used = model_used
                 result.report_language = report_language
+                normalize_chip_structure_availability(result, context.get("chip"))
 
                 # 内容完整性校验（可选）
                 if not config.report_integrity_enabled:
@@ -2677,6 +2825,7 @@ class GeminiAnalyzer:
         name: str,
         news_context: Optional[str] = None,
         report_language: str = "zh",
+        analysis_context_pack_summary: Optional[str] = None,
     ) -> str:
         """
         格式化分析提示词（决策仪表盘 v2.0）
@@ -2700,6 +2849,31 @@ class GeminiAnalyzer:
         today = context.get('today', {})
         unknown_text = get_unknown_text(report_language)
         no_data_text = get_no_data_text(report_language)
+        quote_section_title, close_price_label = _phase_aware_quote_labels(context)
+        hide_regular_session_ohlc = _should_hide_regular_session_ohlc(context)
+        realtime_overlay_quote = hide_regular_session_ohlc and _today_has_realtime_overlay(today)
+        pct_chg_label = "实时涨跌幅" if realtime_overlay_quote else "涨跌幅"
+        volume_label = "实时成交量" if realtime_overlay_quote else "成交量"
+        amount_label = "实时成交额" if realtime_overlay_quote else "成交额"
+        quote_rows = [
+            f"| {close_price_label} | {today.get('close', 'N/A')} 元 |",
+        ]
+        if not hide_regular_session_ohlc:
+            quote_rows.extend(
+                [
+                    f"| 开盘价 | {today.get('open', 'N/A')} 元 |",
+                    f"| 最高价 | {today.get('high', 'N/A')} 元 |",
+                    f"| 最低价 | {today.get('low', 'N/A')} 元 |",
+                ]
+            )
+        quote_rows.extend(
+            [
+                f"| {pct_chg_label} | {today.get('pct_chg', 'N/A')}% |",
+                f"| {volume_label} | {self._format_volume(today.get('volume'))} |",
+                f"| {amount_label} | {self._format_amount(today.get('amount'))} |",
+            ]
+        )
+        quote_rows_text = "\n".join(quote_rows)
         
         # ========== 构建决策仪表盘格式的输入 ==========
         prompt = f"""# 决策仪表盘分析请求
@@ -2712,19 +2886,21 @@ class GeminiAnalyzer:
 | 分析日期 | {context.get('date', unknown_text)} |
 
 ---
+"""
+        prompt += format_market_phase_prompt_section(
+            context.get("market_phase_context"),
+            report_language=report_language,
+        )
+        if isinstance(analysis_context_pack_summary, str) and analysis_context_pack_summary:
+            prompt += analysis_context_pack_summary
+        prompt += f"""
 
 ## 📈 技术面数据
 
-### 今日行情
+### {quote_section_title}
 | 指标 | 数值 |
 |------|------|
-| 收盘价 | {today.get('close', 'N/A')} 元 |
-| 开盘价 | {today.get('open', 'N/A')} 元 |
-| 最高价 | {today.get('high', 'N/A')} 元 |
-| 最低价 | {today.get('low', 'N/A')} 元 |
-| 涨跌幅 | {today.get('pct_chg', 'N/A')}% |
-| 成交量 | {self._format_volume(today.get('volume'))} |
-| 成交额 | {self._format_amount(today.get('amount'))} |
+{quote_rows_text}
 
 ### 均线系统（关键判断指标）
 | 均线 | 数值 | 说明 |
@@ -2863,6 +3039,19 @@ class GeminiAnalyzer:
 | 90%筹码集中度 | {chip.get('concentration_90', 0):.2%} | <15%为集中 |
 | 70%筹码集中度 | {chip.get('concentration_70', 0):.2%} | |
 | 筹码状态 | {chip.get('chip_status', unknown_text)} | |
+"""
+        else:
+            chip_unavailable_text = get_chip_unavailable_text(report_language)
+            chip_instruction = (
+                "Do not fabricate profit ratio, average cost, or concentration. Mention chip data "
+                "unavailability only once in the report; do not repeat per-field no-data text in `chip_structure`."
+                if report_language == "en"
+                else "请勿编造获利比例、平均成本或集中度；报告中只说明一次筹码数据不可用，不要把“数据缺失，无法判断”逐字段重复写入 `chip_structure`。"
+            )
+            prompt += f"""
+### 筹码分布数据（效率指标）
+> {chip_unavailable_text}
+> {chip_instruction}
 """
         
         # 添加趋势分析结果（仅隐式内建 bull_trend 默认回退保留旧口径）
